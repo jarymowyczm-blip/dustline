@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#0a0a0b" />
+<title>DUSTLINE — Realistic FPS</title>
+<meta name="description" content="A realistic browser-based first-person shooter built with Three.js. Procedural PBR textures, image-based lighting, ambient occlusion, ragdoll physics and procedural audio." />
+<style>
+  /* ---------------------------------------------------------------- base -- */
+  :root {
+    --font: 'Inter', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --accent: #d8ff5c;
+    --warn: #ff5b3d;
+    --hud: rgba(232, 238, 226, 0.92);
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #06070a; color: var(--hud);
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    user-select: none; -webkit-user-select: none;
+    touch-action: none;
+  }
+
+  canvas { display: block; width: 100%; height: 100%; }
+  #app { position: fixed; inset: 0; }
+
+  /* ------------------------------------------------------------ loading -- */
+  #loading {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background:
+      radial-gradient(1200px 700px at 50% 40%, #1a1a18 0%, #0a0b0d 60%, #050506 100%);
+    transition: opacity .6s ease;
+  }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+  #loading .brand {
+    font-size: clamp(38px, 9vw, 92px); font-weight: 800; letter-spacing: .34em;
+    text-indent: .34em; color: #f2f4ea; margin-bottom: 6px;
+    text-shadow: 0 2px 0 rgba(0,0,0,.5), 0 24px 60px rgba(0,0,0,.8);
+  }
+  #loading .sub {
+    font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
+    color: rgba(216,255,92,.72); margin-bottom: 38px;
+  }
+  #loadbar {
+    width: min(420px, 70vw); height: 3px; background: rgba(255,255,255,.10);
+    overflow: hidden; border-radius: 2px;
+  }
+  #loadbar > i {
+    display: block; height: 100%; width: 0%;
+    background: linear-gradient(90deg, #8fae2f, var(--accent));
+    box-shadow: 0 0 18px rgba(216,255,92,.6);
+    transition: width .25s ease;
+  }
+  #loadtext {
+    margin-top: 14px; font: 400 11px/1.6 var(--mono); letter-spacing: .16em;
+    color: rgba(255,255,255,.42); text-transform: uppercase; height: 18px;
+  }
+  #loadhint {
+    position: absolute; bottom: 26px; left: 0; right: 0; text-align: center;
+    font: 400 11px/1.7 var(--mono); color: rgba(255,255,255,.28); letter-spacing: .1em;
+  }
+
+  /* --------------------------------------------------------------- HUD --- */
+  #hud {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    opacity: 0; transition: opacity .35s ease;
+  }
+  #hud.on { opacity: 1; }
+
+  /* dynamic crosshair */
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+  }
+  #crosshair .ch-line {
+    position: absolute; background: rgba(240, 245, 235, .92);
+    box-shadow: 0 0 2px rgba(0,0,0,.9), 0 0 1px rgba(0,0,0,1);
+  }
+  #crosshair .ch-dot {
+    position: absolute; width: 2px; height: 2px; margin: -1px 0 0 -1px;
+    background: rgba(255,255,255,.95); border-radius: 50%;
+    box-shadow: 0 0 2px rgba(0,0,0,.8);
+  }
+  #hitmarker {
+    position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0;
+  }
+  #hitmarker i {
+    position: absolute; width: 10px; height: 2px; background: #fff;
+    box-shadow: 0 0 3px rgba(0,0,0,.9);
+  }
+
+  /* bottom-left : health / stamina */
+  .hud-block {
+    position: absolute; padding: 10px 14px;
+    background: linear-gradient(180deg, rgba(8,10,12,.52), rgba(8,10,12,.34));
+    border: 1px solid rgba(255,255,255,.07);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    border-radius: 6px;
+  }
+  #health-block { left: 26px; bottom: 26px; min-width: 232px; }
+  #health-row { display: flex; align-items: baseline; gap: 8px; }
+  #health-num { font: 700 30px/1 var(--font); letter-spacing: -.02em; }
+  #health-lbl { font: 600 10px/1 var(--mono); letter-spacing: .2em; color: rgba(255,255,255,.4); text-transform: uppercase; }
+  .bar { height: 4px; margin-top: 8px; background: rgba(255,255,255,.12); border-radius: 2px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 100%; transition: width .18s ease, background .3s ease; }
+  #health-bar > i { background: linear-gradient(90deg, #6fbf4f, #b6e26a); }
+  #health-block.low #health-bar > i { background: linear-gradient(90deg, #b6402a, #ff6a45); }
+  #health-block.low #health-num { color: #ff8a6b; }
+  #stamina-wrap { margin-top: 12px; display: flex; align-items: center; gap: 8px; }
+  #stamina-wrap .bar { flex: 1; margin: 0; }
+  #stamina-bar > i { background: linear-gradient(90deg, #5f8fd8, #9dd0ff); }
+
+  /* bottom-right : ammo */
+  #ammo-block { right: 26px; bottom: 26px; text-align: right; min-width: 214px; }
+  #weapon-name { font: 600 11px/1 var(--mono); letter-spacing: .22em; color: rgba(255,255,255,.5); text-transform: uppercase; }
+  #fire-mode { font: 500 10px/1 var(--mono); letter-spacing: .18em; color: var(--accent); margin-top: 6px; }
+  #ammo-row { display: flex; align-items: baseline; justify-content: flex-end; gap: 7px; margin-top: 6px; }
+  #ammo-mag { font: 700 40px/1 var(--font); letter-spacing: -.03em; }
+  #ammo-mag.empty { color: #ff6a45; }
+  #ammo-res { font: 500 15px/1 var(--mono); color: rgba(255,255,255,.45); }
+  #reload-progress { margin-top: 10px; height: 3px; background: rgba(255,255,255,.12); border-radius: 2px; overflow: hidden; opacity: 0; }
+  #reload-progress > i { display: block; height: 100%; width: 0%; background: var(--accent); }
+  #utility-row { display: flex; gap: 14px; justify-content: flex-end; margin-top: 10px; font: 600 11px/1 var(--mono); color: rgba(255,255,255,.62); }
+  #utility-row .glyph { color: var(--accent); margin-right: 4px; }
+
+  /* top-center : compass */
+  #compass {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    width: 340px; height: 30px; overflow: hidden; opacity: .9;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 18%, #000 82%, transparent);
+  }
+  #compass-strip { position: absolute; top: 0; left: 0; height: 100%; will-change: transform; }
+  #compass-strip .tick {
+    position: absolute; top: 14px; width: 1px; height: 7px; background: rgba(255,255,255,.28);
+  }
+  #compass-strip .tick.major { top: 11px; height: 10px; background: rgba(255,255,255,.6); }
+  #compass-strip .card {
+    position: absolute; top: 0; font: 700 11px/1 var(--mono); letter-spacing: .1em;
+    color: rgba(255,255,255,.88); transform: translateX(-50%);
+  }
+  #compass-needle {
+    position: absolute; left: 50%; top: 0; width: 0; height: 0; transform: translateX(-50%);
+    border-left: 4px solid transparent; border-right: 4px solid transparent;
+    border-top: 6px solid var(--accent);
+  }
+
+  /* top-left : score / wave */
+  #score-block { left: 26px; top: 22px; min-width: 190px; }
+  #wave-line { font: 700 13px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
+  #wave-line span { color: var(--accent); }
+  #enemy-line { font: 500 11px/1 var(--mono); letter-spacing: .12em; color: rgba(255,255,255,.55); margin-top: 8px; }
+  #score-line { font: 500 11px/1 var(--mono); letter-spacing: .12em; color: rgba(255,255,255,.55); margin-top: 6px; }
+  #score-line b { color: #fff; font-weight: 600; }
+
+  /* top-right : perf */
+  #perf { right: 26px; top: 22px; font: 500 10px/1.7 var(--mono); letter-spacing: .1em; color: rgba(255,255,255,.4); text-align: right; }
+  #perf b { color: var(--accent); font-weight: 600; }
+
+  /* kill feed */
+  #killfeed { position: absolute; right: 26px; top: 92px; width: 300px; text-align: right; }
+  #killfeed .kf {
+    font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+    padding: 5px 0; color: rgba(255,255,255,.85);
+    animation: kfIn .18s ease both;
+  }
+  #killfeed .kf .hs { color: var(--accent); }
+  #killfeed .kf .dist { color: rgba(255,255,255,.38); }
+  @keyframes kfIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+
+  /* damage direction + vignette */
+  #dmg-vignette {
+    position: absolute; inset: 0; opacity: 0; transition: opacity .25s ease;
+    background: radial-gradient(circle at 50% 50%, transparent 42%, rgba(120, 8, 0, .55) 100%);
+  }
+  #dmg-dirs { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  .dmg-dir {
+    position: absolute; left: -26px; top: -190px; width: 52px; height: 46px; opacity: .85;
+    transform-origin: 26px 190px;
+  }
+  .dmg-dir:after {
+    content: ''; position: absolute; left: 50%; top: 0; margin-left: -16px;
+    border-left: 16px solid transparent; border-right: 16px solid transparent;
+    border-top: 22px solid rgba(255, 60, 30, .85);
+    filter: drop-shadow(0 0 6px rgba(255,40,20,.6));
+  }
+
+  /* prompt / toast */
+  #prompt {
+    position: absolute; left: 50%; top: 60%; transform: translate(-50%, 0);
+    font: 600 12px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
+    color: rgba(255,255,255,.9); opacity: 0; transition: opacity .2s ease;
+    background: rgba(8,10,12,.5); padding: 9px 14px; border-radius: 4px;
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  #prompt.on { opacity: 1; }
+  #prompt kbd {
+    display: inline-block; padding: 1px 6px; margin: 0 2px; border-radius: 3px;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2);
+    font-family: var(--mono); font-size: 11px;
+  }
+  #toasts { position: absolute; left: 50%; top: 34%; transform: translateX(-50%); text-align: center; }
+  .toast {
+    font: 700 14px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase;
+    color: var(--accent); text-shadow: 0 0 20px rgba(216,255,92,.35), 0 2px 6px rgba(0,0,0,.8);
+    opacity: 0; animation: toastIn 2.2s ease forwards;
+  }
+  .toast.sub { font-size: 11px; color: rgba(255,255,255,.75); letter-spacing: .26em; margin-top: 8px; }
+  @keyframes toastIn {
+    0% { opacity: 0; transform: translateY(10px) scale(.98); }
+    12% { opacity: 1; transform: none; }
+    78% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* suppress / low-hp screen effects */
+  #lowhp {
+    position: absolute; inset: 0; opacity: 0; transition: opacity .4s ease;
+    background: radial-gradient(circle at 50% 50%, transparent 30%, rgba(90, 0, 0, .62) 100%);
+  }
+  #lowhp.on { animation: pulse 1.15s ease-in-out infinite; opacity: 1; }
+  @keyframes pulse { 0%,100% { filter: brightness(.8); } 50% { filter: brightness(1.35); } }
+
+  /* -------------------------------------------------------------- menus -- */
+  .screen {
+    position: fixed; inset: 0; z-index: 40; display: none;
+    align-items: center; justify-content: center;
+    background: radial-gradient(1100px 640px at 50% 42%, rgba(24,24,22,.72) 0%, rgba(6,7,9,.93) 62%, rgba(4,5,7,.97) 100%);
+    backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+  }
+  .screen.on { display: flex; }
+  .panel {
+    width: min(880px, 92vw); max-height: 88vh; overflow-y: auto;
+    padding: 34px 38px 30px; border-radius: 12px;
+    background: linear-gradient(180deg, rgba(20,22,24,.90), rgba(11,12,14,.92));
+    border: 1px solid rgba(255,255,255,.08);
+    box-shadow: var(--shadow);
+  }
+  .panel.narrow { width: min(520px, 92vw); }
+  .panel h1 {
+    font-size: clamp(32px, 6vw, 56px); font-weight: 800; letter-spacing: .3em;
+    text-indent: .3em; margin-bottom: 4px; color: #f3f5ea;
+  }
+  .panel h2 {
+    font: 600 11px/1 var(--mono); letter-spacing: .34em; text-transform: uppercase;
+    color: rgba(216,255,92,.78); margin-bottom: 26px;
+  }
+  .panel h3 {
+    font: 700 11px/1 var(--mono); letter-spacing: .24em; text-transform: uppercase;
+    color: rgba(255,255,255,.42); margin: 26px 0 12px; padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+  }
+  .panel p { font-size: 13px; line-height: 1.7; color: rgba(255,255,255,.62); }
+  .panel p + p { margin-top: 10px; }
+  .panel code, .panel kbd {
+    font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 3px;
+    background: rgba(255,255,255,.08); color: rgba(255,255,255,.85);
+  }
+  .btns { display: flex; flex-direction: column; gap: 10px; margin-top: 26px; }
+  .btn {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 15px 20px; border-radius: 8px; cursor: pointer;
+    background: rgba(255,255,255,.045);
+    border: 1px solid rgba(255,255,255,.10);
+    font: 600 13px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase;
+    color: rgba(255,255,255,.86);
+    transition: background .14s ease, border-color .14s ease, transform .14s ease, color .14s ease;
+  }
+  .btn:hover { background: rgba(216,255,92,.10); border-color: rgba(216,255,92,.42); color: #fff; transform: translateX(2px); }
+  .btn.primary { background: linear-gradient(90deg, rgba(216,255,92,.20), rgba(216,255,92,.05)); border-color: rgba(216,255,92,.5); color: #fff; }
+  .btn.primary:hover { background: linear-gradient(90deg, rgba(216,255,92,.32), rgba(216,255,92,.10)); }
+  .btn .hint { font: 500 10px/1 var(--mono); letter-spacing: .12em; color: rgba(255,255,255,.34); }
+  .btn.danger:hover { background: rgba(255,91,61,.12); border-color: rgba(255,91,61,.5); }
+  .btn:disabled { opacity: .4; cursor: default; transform: none; }
+
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 12px 20px; align-items: center; padding: 11px 2px; }
+  .row + .row { border-top: 1px solid rgba(255,255,255,.05); }
+  .row label { font: 500 12px/1.5 var(--mono); letter-spacing: .1em; color: rgba(255,255,255,.72); }
+  .row label small { display: block; font-size: 10px; color: rgba(255,255,255,.34); letter-spacing: .06em; margin-top: 3px; }
+  .row .ctl { display: flex; align-items: center; gap: 10px; justify-self: end; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 190px; height: 3px;
+    background: rgba(255,255,255,.16); border-radius: 3px; outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 10px rgba(216,255,92,.5); cursor: pointer;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 13px; height: 13px; border: none; border-radius: 50%; background: var(--accent); cursor: pointer;
+  }
+  .val { min-width: 52px; text-align: right; font: 600 11px/1 var(--mono); color: var(--accent); }
+  select, .seg button {
+    font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+    color: rgba(255,255,255,.85); background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+    padding: 8px 11px; cursor: pointer; outline: none;
+  }
+  select option { background: #14161a; }
+  .seg { display: flex; gap: 6px; }
+  .seg button.on { background: rgba(216,255,92,.20); border-color: rgba(216,255,92,.5); color: #fff; }
+  .switch { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .switch input { display: none; }
+  .switch i {
+    width: 40px; height: 21px; border-radius: 11px; background: rgba(255,255,255,.14);
+    position: relative; transition: background .16s ease; flex: none;
+  }
+  .switch i:after {
+    content: ''; position: absolute; top: 2.5px; left: 2.5px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: transform .16s ease;
+  }
+  .switch input:checked + i { background: rgba(216,255,92,.55); }
+  .switch input:checked + i:after { transform: translateX(19px); }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 6px 28px; }
+  .keymap { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px 26px; }
+  .keymap .km { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .keymap .km span { font: 500 11px/1 var(--mono); letter-spacing: .08em; color: rgba(255,255,255,.6); }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 18px; }
+  .stat {
+    padding: 14px 16px; border-radius: 8px; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.07);
+  }
+  .stat b { display: block; font: 700 22px/1 var(--font); letter-spacing: -.02em; color: #fff; }
+  .stat span { font: 600 9.5px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase; color: rgba(255,255,255,.4); }
+
+  /* --------------------------------------------------------------- misc -- */
+  #lock-overlay {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center; cursor: pointer;
+    background: rgba(4,5,8,.55); backdrop-filter: blur(3px);
+  }
+  #lock-overlay.on { display: flex; }
+  #lock-overlay div {
+    font: 600 13px/1.8 var(--mono); letter-spacing: .22em; text-transform: uppercase;
+    text-align: center; color: rgba(255,255,255,.8);
+  }
+  #lock-overlay small { display: block; font-size: 10px; letter-spacing: .14em; color: rgba(255,255,255,.35); margin-top: 10px; }
+
+  #error-box {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 200;
+    max-width: 82vw; display: none; padding: 12px 16px; border-radius: 8px;
+    background: rgba(80, 12, 6, .92); border: 1px solid rgba(255,110,80,.45);
+    font: 500 11px/1.6 var(--mono); color: #ffdcd2; white-space: pre-wrap;
+  }
+
+  ::-webkit-scrollbar { width: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.14); border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.24); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- ============================================================ loading == -->
+<div id="loading">
+  <div class="brand">DUSTLINE</div>
+  <div class="sub">Realistic Combat Simulation</div>
+  <div id="loadbar"><i></i></div>
+  <div id="loadtext">booting renderer</div>
+  <div id="loadhint">
+    No external assets — every texture, model and sound is generated procedurally at runtime.
+  </div>
+</div>
+
+<!-- ================================================================ HUD == -->
+<div id="hud">
+  <div id="compass">
+    <div id="compass-strip"></div>
+    <div id="compass-needle"></div>
+  </div>
+
+  <div id="crosshair">
+    <div class="ch-line" data-d="up"></div>
+    <div class="ch-line" data-d="down"></div>
+    <div class="ch-line" data-d="left"></div>
+    <div class="ch-line" data-d="right"></div>
+    <div class="ch-dot"></div>
+  </div>
+
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+
+  <div id="score-block" class="hud-block">
+    <div id="wave-line">Wave <span>—</span></div>
+    <div id="enemy-line">Hostiles 0</div>
+    <div id="score-line">Score <b>0</b> · Kills <b>0</b></div>
+  </div>
+
+  <div id="perf"></div>
+
+  <div id="killfeed"></div>
+
+  <div id="health-block" class="hud-block">
+    <div id="health-row"><span id="health-num">100</span><span id="health-lbl">Health</span></div>
+    <div class="bar" id="health-bar"><i></i></div>
+    <div id="stamina-wrap"><div class="bar" id="stamina-bar"><i></i></div></div>
+  </div>
+
+  <div id="ammo-block" class="hud-block">
+    <div id="weapon-name">M4A1 CARBINE</div>
+    <div id="fire-mode">AUTO · 5.56×45</div>
+    <div id="ammo-row"><span id="ammo-mag">30</span><span id="ammo-res">/ 240</span></div>
+    <div id="reload-progress"><i></i></div>
+    <div id="utility-row">
+      <span><span class="glyph">▣</span><b id="grenade-count">2</b> FRAG</span>
+      <span><span class="glyph">✚</span><b id="medkit-count">1</b> MED</span>
+    </div>
+  </div>
+
+  <div id="dmg-vignette"></div>
+  <div id="lowhp"></div>
+  <div id="dmg-dirs"></div>
+  <div id="toasts"></div>
+  <div id="prompt"><kbd>F</kbd> pick up ammo</div>
+</div>
+
+<div id="lock-overlay"><div>Click to capture mouse<small>press ESC to pause</small></div></div>
+
+<!-- ============================================================== menus == -->
+<div class="screen on" id="screen-menu">
+  <div class="panel">
+    <h1>DUSTLINE</h1>
+    <h2>Realistic combat simulation · built with Three.js</h2>
+    <p>A fully procedural first-person shooter: physically based materials, image-based lighting,
+    global ambient occlusion, ragdoll physics and synthesised audio. Nothing is downloaded —
+    every texture, mesh and sound is generated in your browser at load time.</p>
+    <div class="btns">
+      <button class="btn primary" id="btn-play">Deploy to Dustline <span class="hint">Survival — endless waves</span></button>
+      <button class="btn" id="btn-range">Training Range <span class="hint">Shoot steel, no pressure</span></button>
+      <button class="btn" id="btn-settings">Settings <span class="hint">Graphics · Audio · Input</span></button>
+      <button class="btn" id="btn-controls">Controls <span class="hint">Key bindings</span></button>
+      <button class="btn" id="btn-stats">Session Stats <span class="hint">Accuracy · performance</span></button>
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="screen-pause">
+  <div class="panel narrow">
+    <h1 style="font-size:34px">PAUSED</h1>
+    <h2 id="pause-sub">Operation in progress</h2>
+    <div class="btns">
+      <button class="btn primary" id="btn-resume">Resume <span class="hint">ESC</span></button>
+      <button class="btn" id="btn-pause-settings">Settings</button>
+      <button class="btn" id="btn-restart">Restart Operation</button>
+      <button class="btn danger" id="btn-quit">Abandon &amp; Main Menu</button>
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="screen-dead">
+  <div class="panel narrow">
+    <h1 style="font-size:36px">K.I.A.</h1>
+    <h2>You were killed in action</h2>
+    <div class="stat-grid">
+      <div class="stat"><b id="dead-wave">1</b><span>Wave reached</span></div>
+      <div class="stat"><b id="dead-kills">0</b><span>Kills</span></div>
+      <div class="stat"><b id="dead-score">0</b><span>Score</span></div>
+      <div class="stat"><b id="dead-acc">0%</b><span>Accuracy</span></div>
+      <div class="stat"><b id="dead-hs">0%</b><span>Headshots</span></div>
+      <div class="stat"><b id="dead-time">0:00</b><span>Survived</span></div>
+    </div>
+    <div class="btns">
+      <button class="btn primary" id="btn-redeploy">Redeploy</button>
+      <button class="btn" id="btn-dead-menu">Main Menu</button>
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="screen-settings">
+  <div class="panel">
+    <h1 style="font-size:34px">SETTINGS</h1>
+    <h2>Applied instantly · saved to your browser</h2>
+
+    <h3>Graphics</h3>
+    <div class="row">
+      <label>Quality preset <small>Scales AO, shadows, bloom and resolution</small></label>
+      <div class="ctl"><div class="seg" id="seg-quality">
+        <button data-v="low">Low</button><button data-v="medium">Medium</button>
+        <button data-v="high">High</button><button data-v="ultra">Ultra</button>
+      </div></div>
+    </div>
+    <div class="row">
+      <label>Render scale <small>Internal resolution multiplier</small></label>
+      <div class="ctl"><input type="range" id="s-res" min="60" max="150" step="5"><span class="val" id="v-res"></span></div>
+    </div>
+    <div class="row">
+      <label>Field of view <small>Vertical FOV in degrees</small></label>
+      <div class="ctl"><input type="range" id="s-fov" min="60" max="110" step="1"><span class="val" id="v-fov"></span></div>
+    </div>
+    <div class="row">
+      <label>Shadows <small>Sun shadow maps with soft filtering</small></label>
+      <div class="ctl"><div class="seg" id="seg-shadows">
+        <button data-v="off">Off</button><button data-v="low">1024</button>
+        <button data-v="medium">2048</button><button data-v="high">4096</button>
+      </div></div>
+    </div>
+    <div class="row">
+      <label>Ambient occlusion <small>Ground-truth AO — adds contact shading</small></label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="s-ao"><i></i></label></div>
+    </div>
+    <div class="row">
+      <label>Bloom <small>Bright light bleeding, e.g. muzzle flash and sun</small></label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="s-bloom"><i></i></label></div>
+    </div>
+    <div class="row">
+      <label>Anti-aliasing <small>SMAA post-process edge smoothing</small></label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="s-aa"><i></i></label></div>
+    </div>
+    <div class="row">
+      <label>Film grain &amp; grading <small>Subtle lens character — vignette, grain, chroma</small></label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="s-grade"><i></i></label></div>
+    </div>
+    <div class="row">
+      <label>View bob &amp; camera shake <small>Turn off for a steadier image</small></label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="s-bob"><i></i></label></div>
+    </div>
+    <div class="row">
+      <label>Viewmodel sway <small>Weapon inertia while moving and turning</small></label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="s-sway"><i></i></label></div>
+    </div>
+    <div class="row">
+      <label>Blood &amp; gore <small>Impact sprays and ground decals</small></label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="s-gore"><i></i></label></div>
+    </div>
+
+    <h3>Mouse &amp; aim</h3>
+    <div class="row">
+      <label>Sensitivity <small>Hip-fire · cm per 360°</small></label>
+      <div class="ctl"><input type="range" id="s-sens" min="5" max="200" step="1"><span class="val" id="v-sens"></span></div>
+    </div>
+    <div class="row">
+      <label>Aim-down-sights multiplier <small>Relative sensitivity while aiming</small></label>
+      <div class="ctl"><input type="range" id="s-adssens" min="20" max="150" step="5"><span class="val" id="v-adssens"></span></div>
+    </div>
+    <div class="row">
+      <label>Mouse smoothing <small>Filters raw input; 0 = raw</small></label>
+      <div class="ctl"><input type="range" id="s-smooth" min="0" max="10" step="1"><span class="val" id="v-smooth"></span></div>
+    </div>
+    <div class="row">
+      <label>Invert vertical <small>Flight-stick style pitch</small></label>
+      <div class="ctl"><label class="switch"><input type="checkbox" id="s-invert"><i></i></label></div>
+    </div>
+    <div class="row">
+      <label>Aim mode <small>Hold right mouse, or click to toggle</small></label>
+      <div class="ctl"><div class="seg" id="seg-adsmode">
+        <button data-v="hold">Hold</button><button data-v="toggle">Toggle</button>
+      </div></div>
+    </div>
+    <div class="row">
+      <label>Sprint <small>Hold Shift, or toggle with Caps Lock</small></label>
+      <div class="ctl"><div class="seg" id="seg-sprint">
+        <button data-v="hold">Hold</button><button data-v="toggle">Toggle</button>
+      </div></div>
+    </div>
+    <div class="row">
+      <label>Crosshair colour</label>
+      <div class="ctl"><select id="s-xhair">
+        <option value="white">White</option>
+        <option value="green">Green</option>
+        <option value="cyan">Cyan</option>
+        <option value="magenta">Magenta</option>
+        <option value="amber">Amber</option>
+      </select></div>
+    </div>
+
+    <h3>Audio</h3>
+    <div class="row">
+      <label>Master volume</label>
+      <div class="ctl"><input type="range" id="s-vol" min="0" max="100" step="1"><span class="val" id="v-vol"></span></div>
+    </div>
+    <div class="row">
+      <label>Weapons <small>Gunfire, reloads, impacts</small></label>
+      <div class="ctl"><input type="range" id="s-volsfx" min="0" max="100" step="1"><span class="val" id="v-volsfx"></span></div>
+    </div>
+    <div class="row">
+      <label>Environment <small>Wind, ambience — shot tails follow this bus</small></label>
+      <div class="ctl"><input type="range" id="s-volamb" min="0" max="100" step="1"><span class="val" id="v-volamb"></span></div>
+    </div>
+
+    <div class="btns">
+      <button class="btn" id="btn-settings-back">Back</button>
+      <button class="btn" id="btn-settings-reset">Reset to defaults</button>
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="screen-controls">
+  <div class="panel">
+    <h1 style="font-size:34px">CONTROLS</h1>
+    <h2>Default bindings</h2>
+    <div class="keymap" id="keymap"></div>
+    <div class="btns"><button class="btn" id="btn-controls-back">Back</button></div>
+  </div>
+</div>
+
+<div class="screen" id="screen-stats">
+  <div class="panel narrow">
+    <h1 style="font-size:34px">SESSION</h1>
+    <h2 id="stats-sub">Live performance and accuracy</h2>
+    <div class="stat-grid" id="stats-grid"></div>
+    <div class="btns"><button class="btn" id="btn-stats-back">Back</button></div>
+  </div>
+</div>
+
+<div id="error-box"></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
