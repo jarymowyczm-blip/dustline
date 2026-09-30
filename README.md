@@ -80,6 +80,7 @@ downloads, distance-attenuated in 3D.
 | `npm run dev` | Vite dev server with hot reload |
 | `npm run build` | Production build into `dist/` |
 | `npm run build:single` | Builds **one self-contained `.html`** into `dist/` — the whole game, including the engine, inlined into a single file you can email or drop on a static host |
+| `npm run publish:pages` | Builds and refreshes the committed `docs/` site that GitHub Pages serves |
 | `npm run preview` | Serve the production build on port 4173 |
 | `npm test` | Headless smoke suite (no GPU needed) |
 
@@ -100,14 +101,36 @@ downloads, distance-attenuated in 3D.
 - 600 frames of AI run without throwing, hit spheres report headshots, and a ragdoll
   settles without tunnelling through the floor.
 
-## Deployment (GitHub Pages)
+## Play it from GitHub Pages
 
-The repo ships a workflow at `.github/workflows/pages.yml`. Push to `main`, then in
-**Settings → Pages** set the source to **GitHub Actions**. The build uses a relative
-base, so the game works from `https://<user>.github.io/<repo>/` without changes.
+This repository already contains a **ready-to-serve build in [`docs/`](docs)**, so Pages
+needs no CI, no secrets and no build step:
 
-Prefer a single file? Run `npm run build:single` and upload
-`dist/dustline-single.html` anywhere — itch.io, a static host, or a USB stick.
+1. Fork or copy this repository (or push it to your own GitHub account).
+2. **Settings → Pages → Source: _Deploy from a branch_**, then pick **`main`** and
+   **`/docs`** → **Save**.
+3. Wait about a minute. Your game is live at `https://<user>.github.io/<repo>/`.
+
+Every asset path in the build is relative, so it works from any sub-path without
+configuration.
+
+### Updating the live site
+
+Edit the source, then refresh the committed build and push:
+
+```bash
+npm run publish:pages          # rebuilds docs/ from scratch
+git add docs && git commit -m "Update Pages build" && git push
+```
+
+`npm run publish:pages` wipes `docs/` first, so content-hashed bundles never pile up.
+
+### Other ways to ship it
+
+- `npm run build:single` → `dist/dustline-single.html`, the entire game in one 1.4 MB
+  file. Upload it to itch.io, Netlify, Dropbox, or just double-click it — no server needed.
+- `npm run build` → `dist/` with hashed assets, ready for any static host (Vercel,
+  Netlify, S3, nginx).
 
 ## How the procedural assets work
 
@@ -135,6 +158,8 @@ src/
   game/                    game loop, waves, scoring
 test/smoke.mjs             headless assertions
 tools/bundle-single.mjs    inlines the build into a single HTML file
+tools/publish-pages.mjs    refreshes the committed docs/ site for GitHub Pages
+docs/                      the built game that Pages serves (main → /docs)
 ```
 
 ## Notes

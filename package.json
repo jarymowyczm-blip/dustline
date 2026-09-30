@@ -11,6 +11,7 @@
     "preview": "vite preview --port 4173",
     "start": "vite --open",
     "build:single": "vite build && node tools/bundle-single.mjs",
+    "publish:pages": "vite build && node tools/publish-pages.mjs",
     "test": "node test/smoke.mjs"
   },
   "keywords": [
